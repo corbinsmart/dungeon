@@ -1,16 +1,16 @@
-# controls
-wasd to move
-<>^v to shoot
-
-# running
-## c++
+## running
+**c++**
 ```
 cd cdungeon
 gcc -o cdungeon main.cpp
 ./cdungeon
 ```
-## nim
+**nim**
 ```
 cd paradungeon
 nimble run
 ```
+
+## controls
+* wasd to move
+* <>^v to shoot
