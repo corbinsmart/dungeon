@@ -1,9 +1,9 @@
 import os
+import terminal
 import rdstdin
 import strformat
 import strutils
 import random
-import macros
 import pararules
 
 ########
@@ -33,8 +33,6 @@ var
   turn_number: int = 0
   alive: bool = true
   generating: bool = true
-  # get_input = true
-
 
 ###########
 # pararules
@@ -165,7 +163,6 @@ let rules =
         session.insert(Player, Y, y+dy)
 
 var session = initSession(Fact)
-# session = initSession(Fact)
 for r in rules.fields:
   session.add(r)
 
@@ -257,8 +254,8 @@ proc box(width: int, height: int): string =
   txt.add(edge)
 
   txt
-proc display(txt: string, inpu_enabled: bool) =
-  # echo "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+proc display(txt: string, input_enabled: bool) =
+  echo "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
 
   # status
   if not generating:
@@ -282,16 +279,10 @@ proc display(txt: string, inpu_enabled: bool) =
 # logic
 #######
 proc simulate() =
-  var shot_coords: seq[coord2D] = get_shot_coords()
-
-  while shot_coords.len > 0:
-    # search again
-    shot_coords = get_shot_coords()
-
-    # move shots
-    for i in 0..<shot_coords.len:
+  proc move_shots(coords: seq[coord2D]) =
+    for i in 0..<coords.len:
       let
-        coord = shot_coords[i]
+        coord = coords[i]
         x = coord.x
         y = coord.y
         ch = char_at(x, y)
@@ -311,14 +302,10 @@ proc simulate() =
         else:
           discard
 
-    let delay = 0.05
-    wait(delay)
-
-    # show
-    display(room, false)
-  
-  # display normal
+  let coords = get_shot_coords()
+  move_shots(coords)
   display(room, true)
+
 proc process_input(input_ch: char) =
   # pararules
   session.insert(Global, Input, input_ch)
@@ -340,14 +327,14 @@ proc process_input(input_ch: char) =
       dx = 1
 
     # shoot
-    # of '^':
-    #   dy = -1
-    # of 'v':
-    #   dy = 1
-    # of '>':
-    #   dx = 1
-    # of '<':
-    #   dx = -1
+    of '^':
+      dy = -1
+    of 'v':
+      dy = 1
+    of '>':
+      dx = 1
+    of '<':
+      dx = -1
 
     else:
       discard
@@ -364,11 +351,6 @@ proc process_input(input_ch: char) =
     next_next_y = player_y + dy + dy
     next_next_ch = char_at(next_next_x, next_next_y)
   
-  # debug
-  # echo input_ch
-  # echo fmt("is_move {is_move_ch}")
-  # echo fmt("is_shoot {is_shoot_ch}")
-
   # move
   if is_move_ch and next_ch == '.':
     set_char_at('.', player_x, player_y)
@@ -379,42 +361,42 @@ proc process_input(input_ch: char) =
     player_y = next_y
 
   # push
-  # if is_move_ch and next_ch == 'o' and next_next_ch == '.':
-  #   # move player
-  #   set_char_at('.', player_x, player_y)
-  #   set_char_at('@', next_x, next_y)
+  if is_move_ch and next_ch == 'o' and next_next_ch == '.':
+    # move player
+    set_char_at('.', player_x, player_y)
+    set_char_at('@', next_x, next_y)
 
-  #   # move bag
-  #   set_char_at('o', next_x+dx, next_y+dy)
+    # move bag
+    set_char_at('o', next_x+dx, next_y+dy)
 
-  #  # update pos
-  #  player_x = next_x
-  #  player_y = next_y
+    # update pos
+    player_x = next_x
+    player_y = next_y
 
   # shoot
-  # elif is_shoot_ch and next_ch == '.':
-  #   # place shot
-  #   set_char_at(input_ch, next_x, next_y)
+  elif is_shoot_ch and next_ch == '.':
+    # place shot
+    set_char_at(input_ch, next_x, next_y)
 
   # place enemy
-  # if roll_d20() < 5:
-  #   let
-  #     enemy_coord = random_coord()
-  #     ch = char_at(enemy_coord.x, enemy_coord.y)
-  #   if ch == '.':
-  #     set_char_at('!', enemy_coord.x, enemy_coord.y)
+  if roll_d20() < 5:
+    let
+      enemy_coord = random_coord()
+      ch = char_at(enemy_coord.x, enemy_coord.y)
+    if ch == '.':
+      set_char_at('!', enemy_coord.x, enemy_coord.y)
     
   # place bag
-  # elif roll_d20() < 3:
-  #   let
-  #     bag_coord = random_coord()
-  #     ch = char_at(bag_coord.x, bag_coord.y)
-  #   if ch == '.':
-  #     set_char_at('o', bag_coord.x, bag_coord.y)
+  elif roll_d20() < 3:
+    let
+      bag_coord = random_coord()
+      ch = char_at(bag_coord.x, bag_coord.y)
+    if ch == '.':
+      set_char_at('o', bag_coord.x, bag_coord.y)
 
   # check alive
-  # if is_adjacent_to('!', player_x, player_y):
-  #   alive = false
+  if is_adjacent_to('!', player_x, player_y):
+    alive = false
 
   # inc turn
   turn_number += 1
@@ -502,11 +484,19 @@ while true:
   # shots
   simulate()
 
+  # char by char input
+  let ch = getch()
+  if ch == 'q':
+    alive = false
+  input = fmt"{ch}"
+  echo fmt"input:{input}"
+
   # get input
-  input = cin()
+  # input = cin()
   for i in 0..<input.len:
     let input_ch = input[i]
     process_input(input_ch)
   
   # show
   display(room, true)
+  wait(0.01)

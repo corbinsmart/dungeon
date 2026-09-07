@@ -14,3 +14,4 @@ nimble run
 ## controls
 * wasd to move
 * <>^v to shoot
+* q to quit
