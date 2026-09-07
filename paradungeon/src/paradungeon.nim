@@ -1,8 +1,10 @@
 import os
-import std/rdstdin
-import std/strformat
+import rdstdin
+import strformat
 import strutils
-import std/random
+import random
+import macros
+import pararules
 
 ########
 # struct
@@ -32,6 +34,140 @@ var
   alive: bool = true
   generating: bool = true
   # get_input = true
+
+
+###########
+# pararules
+###########
+type
+  Id = enum
+    Global,
+    Player,
+    Cell,
+  Attr = enum
+    X, Y,
+    Input,
+    CellType,
+
+    Adjacent, Above, Below, Left, Right
+
+schema Fact(Id, Attr):
+  X: int
+  Y: int
+  Input: char
+  CellType: char
+
+  Above: Id
+  Below: int
+  Left: int
+  Right: int
+  Adjacent: int
+
+let rules =
+  ruleset:
+    # rule getPlayer(Fact):
+    #   what:
+    #     (Player, X, x)
+    #     (Player, Y, y)
+
+    # adjacency
+    rule getAbove(Fact):
+      what:
+        (id1, X, x)
+        (id1, Y, y1)
+        (id2, X, x)
+        (id2, Y, y2)
+      cond:
+        y1 == y2-1
+      then:
+        session.insert(id1, Above, id2)
+        session.insert(id1, Adjacent, id2)
+    rule getBelow(Fact):
+      what:
+        (id1, X, x)
+        (id1, Y, y1)
+        (id2, X, x)
+        (id2, Y, y2)
+      cond:
+        y1 == y2+1
+      then:
+        session.insert(id1, Below, id2)
+        session.insert(id1, Adjacent, id2)
+    rule getLeft(Fact):
+      what:
+        (id1, X, x1)
+        (id1, Y, y)
+        (id2, X, x2)
+        (id2, Y, y)
+      cond:
+        x1 == x2-1
+      then:
+        session.insert(id1, Left, id2)
+        session.insert(id1, Adjacent, id2)
+    rule getRight(Fact):
+      what:
+        (id1, X, x1)
+        (id1, Y, y)
+        (id2, X, x2)
+        (id2, Y, y)
+      cond:
+        x1 == x2+1
+      then:
+        session.insert(id1, Left, id2)
+        session.insert(id1, Adjacent, id2)
+
+    rule getQuestionAbove(Fact):
+      what:
+        (cid, Above, Player)
+        (cid, CellType, '?')
+      then:
+        echo "? is above @"
+
+    rule getQuestionAdjacent(Fact):
+      what:
+        (cid, Adjacent, Player)
+        (cid, CellType, '?')
+      then:
+        echo "? adjacent @"
+
+    rule getPlayerAdjacent(Fact):
+      what:
+        (Player, Adjacent, cid)
+        (cid, CellType, '?')
+      then:
+        echo "@ adjacent ?"
+    
+    rule playerMove(Fact):
+      what:
+        (Player, X, x)
+        (Player, Y, y)
+      cond:
+        true
+      then:
+        echo "@ ",x,",",y
+
+    rule receiveInput(Fact):
+      what:
+        (Global, Input, input)
+        (Player, X, x, then=false)
+        (Player, Y, y, then=false)
+      then:
+        let
+          dx = case input:
+            of 'a': -1
+            of 'd': 1
+            else:   0
+          dy = case input:
+            of 'w': -1
+            of 's': 1
+            else:   0
+        session.insert(Player, X, x+dx)
+        session.insert(Player, Y, y+dy)
+
+var session = initSession(Fact)
+# session = initSession(Fact)
+for r in rules.fields:
+  session.add(r)
 
 ######
 # util
@@ -94,6 +230,12 @@ proc get_shot_coords(): seq[coord2D] =
         shot_coords.add(coord)
   shot_coords
 
+# pararules
+var next_id = Id.high.ord + 1
+proc get_next_id(): int =
+  next_id += 1
+  next_id
+
 ######
 # draw
 ######
@@ -116,7 +258,7 @@ proc box(width: int, height: int): string =
 
   txt
 proc display(txt: string, inpu_enabled: bool) =
-  echo "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+  # echo "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
 
   # status
   if not generating:
@@ -177,8 +319,10 @@ proc simulate() =
   
   # display normal
   display(room, true)
-
 proc process_input(input_ch: char) =
+  # pararules
+  session.insert(Global, Input, input_ch)
+
   var
     dx = 0
     dy = 0
@@ -196,14 +340,14 @@ proc process_input(input_ch: char) =
       dx = 1
 
     # shoot
-    of '^':
-      dy = -1
-    of 'v':
-      dy = 1
-    of '>':
-      dx = 1
-    of '<':
-      dx = -1
+    # of '^':
+    #   dy = -1
+    # of 'v':
+    #   dy = 1
+    # of '>':
+    #   dx = 1
+    # of '<':
+    #   dx = -1
 
     else:
       discard
@@ -235,59 +379,66 @@ proc process_input(input_ch: char) =
     player_y = next_y
 
   # push
-  if is_move_ch and next_ch == 'o' and next_next_ch == '.':
-    # move player
-    set_char_at('.', player_x, player_y)
-    set_char_at('@', next_x, next_y)
+  # if is_move_ch and next_ch == 'o' and next_next_ch == '.':
+  #   # move player
+  #   set_char_at('.', player_x, player_y)
+  #   set_char_at('@', next_x, next_y)
 
-    # move bag
-    set_char_at('o', next_x+dx, next_y+dy)
+  #   # move bag
+  #   set_char_at('o', next_x+dx, next_y+dy)
 
-    # update pos
-    player_x = next_x
-    player_y = next_y
+  #  # update pos
+  #  player_x = next_x
+  #  player_y = next_y
 
   # shoot
-  elif is_shoot_ch and next_ch == '.':
-    # place shot
-    set_char_at(input_ch, next_x, next_y)
+  # elif is_shoot_ch and next_ch == '.':
+  #   # place shot
+  #   set_char_at(input_ch, next_x, next_y)
 
   # place enemy
-  if roll_d20() < 5:
-    let
-      enemy_coord = random_coord()
-      ch = char_at(enemy_coord.x, enemy_coord.y)
-    if ch == '.':
-      set_char_at('!', enemy_coord.x, enemy_coord.y)
+  # if roll_d20() < 5:
+  #   let
+  #     enemy_coord = random_coord()
+  #     ch = char_at(enemy_coord.x, enemy_coord.y)
+  #   if ch == '.':
+  #     set_char_at('!', enemy_coord.x, enemy_coord.y)
     
   # place bag
-  elif roll_d20() < 3:
-    let
-      bag_coord = random_coord()
-      ch = char_at(bag_coord.x, bag_coord.y)
-    if ch == '.':
-      set_char_at('o', bag_coord.x, bag_coord.y)
+  # elif roll_d20() < 3:
+  #   let
+  #     bag_coord = random_coord()
+  #     ch = char_at(bag_coord.x, bag_coord.y)
+  #   if ch == '.':
+  #     set_char_at('o', bag_coord.x, bag_coord.y)
 
   # check alive
-  if is_adjacent_to('!', player_x, player_y):
-    alive = false
+  # if is_adjacent_to('!', player_x, player_y):
+  #   alive = false
 
   # inc turn
   turn_number += 1
   
-
 ######
 # main
 ######
-var input = ""
+var
+  args = commandLineParams()
+  input = ""
 
-cout "width? "
-input = cin()
-room_width = parseInt(input)+2
+# get room gen params
+if args.len == 2:
+  echo fmt("args: {args}")
+  room_width = parseInt(args[0])
+  room_height = parseInt(args[1])
+else:
+  cout "width? "
+  input = cin()
+  room_width = parseInt(input)+2
 
-cout "height? "
-input = cin()
-room_height = parseInt(input)+2
+  cout "height? "
+  input = cin()
+  room_height = parseInt(input)+2
 
 echo fmt "generating {room_width}x{room_height}..."
 
@@ -321,15 +472,23 @@ for h in 0..<room_width:
 wait(0.1)
 
 # place player
-player_x = (room_width / 2).int
-player_y = (room_height / 2).int
+player_x = (room_width/2).int
+player_y = (room_height/2).int
 set_char_at('@', player_x, player_y)
+# pararules
+session.insert(Player, X, player_x)
+session.insert(Player, Y, player_y)
 
 wait(0.1)
 
 # place help
 let help_coord: coord2D = random_coord()
 set_char_at('?', help_coord.x, help_coord.y)
+# pararules
+let qid = get_next_id()
+session.insert(qid, X, help_coord.x)
+session.insert(qid, Y, help_coord.y)
+session.insert(qid, CellType, '?')
 
 # done generating
 generating = false
