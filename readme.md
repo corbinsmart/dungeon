@@ -2,7 +2,7 @@
 **c++**
 ```
 cd cdungeon
-gcc -o cdungeon main.cpp
+g++ -o cdungeon main.cpp
 ./cdungeon
 ```
 **nim**

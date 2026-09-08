@@ -1,9 +1,11 @@
 import os
 import terminal
+import random
 import rdstdin
 import strformat
 import strutils
-import random
+import sequtils
+import sugar
 import pararules
 
 ########
@@ -30,7 +32,7 @@ var
   room: string
   player_x: int
   player_y: int
-  turn_number: int = 0
+  turn_number: int
   alive: bool = true
   generating: bool = true
 
@@ -40,33 +42,102 @@ var
 type
   Id = enum
     Global,
+    Derived,
     Player,
     Cell,
   Attr = enum
+    # global
+    TurnNumber,
+
+    # entity  
     X, Y,
     Input,
     CellType,
+    Spawnable,
 
-    Adjacent, Above, Below, Left, Right
+    # derived
+    Adjacent, Above, Below, Left, Right,
+    AllAdjacent,
+  Ids = seq[int]
+  Cells = seq[tuple[id: int, x: int, y: int]]
 
 schema Fact(Id, Attr):
+  # global
+  TurnNumber: int
+
+  # entity
   X: int
   Y: int
   Input: char
   CellType: char
+  Spawnable: bool
 
+  # derived
   Above: Id
   Below: int
   Left: int
   Right: int
   Adjacent: int
+  AllAdjacent: Cells
 
 let rules =
   ruleset:
-    # rule getPlayer(Fact):
+    # getter
+    rule getPlayer(Fact):
+      what:
+        (Player, X, x)
+        (Player, Y, y)
+
+    rule getTurnNumber(Fact):
+      what:
+        (Global, TurnNumber, n)
+      then:
+        echo "turn number:",n
+    
+    rule getSpawnable(Fact):
+      what:
+        (id, CellType, '.')
+        (Derived, AllAdjacent, cells)
+      cond:
+        let ids = cells.map(c => c.id)
+        id not in ids
+      then:
+        session.insert(id, Spawnable, true)
+
+    rule spawnEnemy(Fact):
+      what:
+        (Global, TurnNumber, n)
+      then:
+        let results = session.queryAll(rules.getSpawnable)
+
+    rule getAdjacent():
+      what:
+        (id, Adjacent, Player)
+      then:
+        let cells = session.queryAll(this)
+        session.insert(Derived, AllAdjacent, cells)
+
+    # rule getAdjacentCells(Fact):
+    #   dicard
+      # should be a collection of adjacent cells
+      # queryall
+    # spawnable should just subtract adjacent cells from all empty cells
+
+
+    # spawn
+    # rule emptySpawnable(Fact):
     #   what:
-    #     (Player, X, x)
-    #     (Player, Y, y)
+    #     (cid, CellType, '.')
+    #   then:
+    #     session.insert(cid, Spawnable, true)
+    # rule notSpawnableAdjacent(Fact):
+    #   what:
+    #     (cid, Spawnable, true)
+    #     (cid, Adjacent, Player)
+    #   then:
+    #     session.insert(cid, Spawnable, false)
+
+      
 
     # adjacency
     rule getAbove(Fact):
@@ -120,30 +191,26 @@ let rules =
         (cid, CellType, '?')
       then:
         echo "? is above @"
-
     rule getQuestionAdjacent(Fact):
       what:
         (cid, Adjacent, Player)
         (cid, CellType, '?')
       then:
         echo "? adjacent @"
-
     rule getPlayerAdjacent(Fact):
       what:
         (Player, Adjacent, cid)
         (cid, CellType, '?')
       then:
         echo "@ adjacent ?"
-    
+
     rule playerMove(Fact):
       what:
         (Player, X, x)
         (Player, Y, y)
-      cond:
-        true
       then:
-        echo "@ ",x,",",y
-
+        # echo "@ ",x,",",y
+        discard
     rule receiveInput(Fact):
       what:
         (Global, Input, input)
@@ -255,7 +322,7 @@ proc box(width: int, height: int): string =
 
   txt
 proc display(txt: string, input_enabled: bool) =
-  echo "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+  # echo "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
 
   # status
   if not generating:
@@ -305,7 +372,6 @@ proc simulate() =
   let coords = get_shot_coords()
   move_shots(coords)
   display(room, true)
-
 proc process_input(input_ch: char) =
   # pararules
   session.insert(Global, Input, input_ch)
@@ -385,7 +451,7 @@ proc process_input(input_ch: char) =
       ch = char_at(enemy_coord.x, enemy_coord.y)
     if ch == '.':
       set_char_at('!', enemy_coord.x, enemy_coord.y)
-    
+  
   # place bag
   elif roll_d20() < 3:
     let
@@ -400,6 +466,7 @@ proc process_input(input_ch: char) =
 
   # inc turn
   turn_number += 1
+  session.insert(Global, TurnNumber, turn_number)
   
 ######
 # main
@@ -411,8 +478,8 @@ var
 # get room gen params
 if args.len == 2:
   echo fmt("args: {args}")
-  room_width = parseInt(args[0])
-  room_height = parseInt(args[1])
+  room_width = parseInt(args[0])+2
+  room_height = parseInt(args[1])+2
 else:
   cout "width? "
   input = cin()
@@ -429,51 +496,58 @@ var
   delay_add = 0.001
   delay_max = 0.02
 
-# grow vertically
-for h in 0..<room_height:
-  echo h
-  room = box(2,h)
-  display(room, false)
+# intro animation
+proc intro() =
+  # grow vertically
+  for h in 0..<room_height:
+    echo h
+    room = box(2,h)
+    display(room, false)
 
-  wait(delay)
-  delay += delay_add
-  if delay > delay_max:
-    delay = delay_max
+    wait(delay)
+    delay += delay_add
+    if delay > delay_max:
+      delay = delay_max
 
-# grow horizontally
-delay *= 0.33
-for h in 0..<room_width:
-  room = box(h,room_height-1)
-  display(room, false)
+  # grow horizontally
+  delay *= 0.33
+  for h in 0..<room_width:
+    room = box(h,room_height-1)
+    display(room, false)
 
-  wait(delay)
-  delay += delay_add
-  if delay > delay_max:
-    delay = delay_max
+    wait(delay)
+    delay += delay_add
+    if delay > delay_max:
+      delay = delay_max
 
-wait(0.1)
+  wait(0.1)
 
-# place player
-player_x = (room_width/2).int
-player_y = (room_height/2).int
-set_char_at('@', player_x, player_y)
-# pararules
-session.insert(Player, X, player_x)
-session.insert(Player, Y, player_y)
+  # place player
+  player_x = (room_width/2).int
+  player_y = (room_height/2).int
+  set_char_at('@', player_x, player_y)
+  # pararules
+  session.insert(Player, X, player_x)
+  session.insert(Player, Y, player_y)
 
-wait(0.1)
+  wait(0.1)
 
-# place help
-let help_coord: coord2D = random_coord()
-set_char_at('?', help_coord.x, help_coord.y)
-# pararules
-let qid = get_next_id()
-session.insert(qid, X, help_coord.x)
-session.insert(qid, Y, help_coord.y)
-session.insert(qid, CellType, '?')
+  # place help
+  let help_coord: coord2D = random_coord()
+  set_char_at('?', help_coord.x, help_coord.y)
+  # pararules
+  let qid = get_next_id()
+  session.insert(qid, X, help_coord.x)
+  session.insert(qid, Y, help_coord.y)
+  session.insert(qid, CellType, '?')
+intro()
 
 # done generating
 generating = false
+
+# pararules init
+turn_number = 0
+session.insert(Global, TurnNumber, 0)
 
 # game loop
 while true:
@@ -491,8 +565,10 @@ while true:
   input = fmt"{ch}"
   echo fmt"input:{input}"
 
-  # get input
+  # line by line input
   # input = cin()
+
+  # process input
   for i in 0..<input.len:
     let input_ch = input[i]
     process_input(input_ch)

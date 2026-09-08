@@ -2,9 +2,9 @@
 #include <fstream>
 #include <string>
 #include <cctype>
-#include <unistd.h>
-// #include <sstream>
 #include <vector>
+#include <unistd.h>
+#include <termios.h>
 using namespace std;
 
 /////////
@@ -37,6 +37,18 @@ bool get_input = true;
 ///////
 // util
 ///////
+char getch() {
+  struct termios oldt,
+  newt;
+  int ch;
+  tcgetattr( STDIN_FILENO, &oldt );
+  newt = oldt;
+  newt.c_lflag &= ~( ICANON | ECHO );
+  tcsetattr( STDIN_FILENO, TCSANOW, &newt );
+  ch = getchar();
+  tcsetattr( STDIN_FILENO, TCSANOW, &oldt );
+  return ch;
+}
 int random_int(int min, int max) {
   return min + rand() % max;
 }
@@ -301,16 +313,35 @@ void process_input(char input_ch) {
   turn_number++;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+  // argc is the number of command line args
+  // argv is an array of the args
+
+  // ex1:
+    // ./cdungeon
+    // argc = 1
+    // argv = ["./cdungeon"]
+  
+  // ex2:
+    // ./cdungeon 40 20
+    // argc = 3
+    // argv = ["./cdungeon", "40", "20"]
+
   string input;
-
-  cout << "width? ";
-  cin >> input;
-  room_width = stoi(input)+2;
-
-  cout << "height? ";
-  cin >> input;
-  room_height = stoi(input)+2;
+  
+  if (argc == 3) {
+    room_width = stoi(argv[1])+2;
+    room_height = stoi(argv[2])+2;
+  }
+  else {
+    cout << "width? ";
+    cin >> input;
+    room_width = stoi(input)+2;
+  
+    cout << "height? ";
+    cin >> input;
+    room_height = stoi(input)+2;
+  }
 
   cout << "generating " << room_width << "x" << room_height << "..." << endl;
 
@@ -365,9 +396,17 @@ int main() {
     // shots
     simulate();
 
-    // get input
-    string input;
-    cin >> input;
+    // char by char input
+    char ch = getch();
+    if (ch == 'q')
+      alive = false;
+    input = "";
+    input.push_back(ch);
+
+    // line by line input
+    // cin >> input;
+
+    // process input
     for (int i = 0; i < input.length(); i++) {
       char input_ch = input[i];
       process_input(input_ch);
@@ -375,6 +414,7 @@ int main() {
 
     // show
     display(room, true);
+    wait(0.01f);
   }
 
   // exit when done
