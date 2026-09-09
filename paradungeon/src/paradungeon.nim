@@ -26,10 +26,10 @@ const
 # global state
 ##############
 var
-  room_width: int
-  room_height: int
   room: ref seq[seq[char]] = nil
   PLAYER_ID: int
+  # room_width: int
+  # room_height: int
   # player_x: int
   # player_y: int
 
@@ -51,6 +51,8 @@ type
 
   Attr = enum
     # global
+    RoomWidth,
+    RoomHeight,
     TurnNumber,
     ShowHelp,
     Alive,
@@ -59,7 +61,7 @@ type
     # entity  
     X, Y, T,
     Input,
-    CellType,
+    Type,
     Spawnable,
     Moving,
 
@@ -69,7 +71,7 @@ type
     AllCells,
   V2 = tuple[x: int, y: int]
   Ids = seq[int]
-  Cells = ref seq[tuple[id: int, x: int, y: int, cell_type: char]]
+  Cells = ref seq[tuple[id: int, x: int, y: int, t: char]]
 
 ################
 # pararules util
@@ -106,6 +108,8 @@ proc xy_to_dir(x: int, y: int): Dir =
 #################
 schema Fact(Id, Attr):
   # global
+  RoomWidth: int
+  RoomHeight: int
   TurnNumber: int
   ShowHelp: bool
   Alive: bool
@@ -116,7 +120,7 @@ schema Fact(Id, Attr):
   Y: int
   T: int
   Input: char
-  CellType: char
+  Type: char
   Spawnable: bool
   Moving: Dir
 
@@ -135,6 +139,8 @@ let (initSession, rules) =
     # getter
     rule getGlobal(Fact):
       what:
+        (Global, RoomWidth, room_width)
+        (Global, RoomHeight, room_height)
         (Global, TurnNumber, turn_number)
         (Global, ShowHelp, show_help)
         (Global, Alive, alive)
@@ -150,13 +156,15 @@ let (initSession, rules) =
       what:
         (id, X, x)
         (id, Y, y)
-        (id, CellType, cell_type)
+        (id, Type, t)
+      cond:
+        t != ' '
     
     # setter
     # rule setShowHelp(Fact):
     #   what:
     #     (Player, Adjacent, id)
-    #     (id, CellType, '?')
+    #     (id, Type, '?')
     #   then:
     #     session.insert(Global, ShowHelp, true)
 
@@ -165,7 +173,7 @@ let (initSession, rules) =
       what:
         (id, X, x)
         (id, Y, y)
-        (id, CellType, cell_type)
+        (id, Type, t)
       then:
         var cells: Cells = nil
         new cells
@@ -183,7 +191,7 @@ let (initSession, rules) =
     #       cells = allCells[]
     #       index = rand(0..<cells.len)
     #       c = cells[index]
-    #     session.insert(c.id, CellType, '?')
+    #     session.insert(c.id, Type, '?')
     #     # echo "? ",c.x,",",c.y
 
     rule spawnPlayer(Fact):
@@ -198,11 +206,45 @@ let (initSession, rules) =
           index = rand(0..<cells.len)
           c = cells[index]
         PLAYER_ID = get_next_id()
-        session.insert(PLAYER_ID, CellType, '@')
+        session.insert(PLAYER_ID, Type, '@')
         session.insert(PLAYER_ID, X, c.x)
         session.insert(PLAYER_ID, Y, c.y)
         session.insert(PLAYER_ID, T, t)
         # echo "@ ",c.x,",",c.y
+
+    rule spawnWall(Fact):
+      what:
+        (Global, TurnNumber, t)
+        (Global, RoomWidth, room_width)
+        (Global, RoomHeight, room_height)
+        (sid, Type, ' ')
+        (sid, X, x)
+        (sid, Y, y)
+      cond:
+        t == 0
+        (x == 0 or
+         y == 0 or
+         x == room_width-1 or
+         y == room_height-1)
+      then:
+        let wid = get_next_id()
+        session.insert(wid, X, x)
+        session.insert(wid, Y, y)
+        session.insert(wid, Type, '#')
+
+    # rule spawnBag(Fact):
+    #   what:
+    #     (Global, TurnNumber, t)
+    #     (Global, D20, d20)
+    #     (Derived, AllCells, allCells, then=false)
+    #   cond:
+    #     d20 < 5
+    #   then:
+    #     let
+    #       cells = allCells[]
+    #       index = rand(0..<cells.len)
+    #       c = cells[index]
+    #     session.insert(c.id, Type, 'o')
 
     # rule spawnEnemy(Fact):
     #   what:
@@ -217,8 +259,7 @@ let (initSession, rules) =
     #       cells = allCells[]
     #       index = rand(0..<cells.len)
     #       c = cells[index]
-    #     session.insert(c.id, CellType, '!')
-    #     # echo "! ",c.x,",",c.y
+    #     session.insert(c.id, Type, '!')
 
     # random
     rule rollD20(Fact):
@@ -285,7 +326,7 @@ let (initSession, rules) =
       what:
         (Global, Input, input)
         (Global, TurnNumber, t, then=false)
-        (id, CellType, '@')
+        (id, Type, '@')
         (id, X, x, then=false)
         (id, Y, y, then=false)
       then:
@@ -299,13 +340,34 @@ let (initSession, rules) =
         # inc turn
         session.insert(Global, TurnNumber, t+1)
 
+    rule playerPushesBagRight(Fact):
+      what:
+        (pid, Type, '@')
+        (pid, Moving, Dir.Right)
+        (bid, Type, 'o')
+        (bid, RightOf, pid)
+      then:
+        session.insert(bid, Moving, Dir.Right)
+
+    rule wallStopsActorMovingDown(Fact):
+      what:
+        (id, Moving, Dir.Down)
+        (id, Y, y, then=false)
+        (id, Above, wid)
+        (wid, Type, '#')
+      then:
+        echo "wall stop"
+        # session.retract(id, Moving)
+        session.insert(id, Y, y)
+
     rule moveDown(Fact):
       what:
         (id, Y, y, then=false)
         (id, Moving, Dir.Down)
-        (id, Above, id1)
-        (id1, CellType, '.')
+        # (id, Above, id1)
+        # (id1, Type, '.')
       then:
+        echo "move down"
         session.insert(id, Y, y+1)
         session.retract(id, Moving)
 
@@ -313,8 +375,8 @@ let (initSession, rules) =
       what:
         (id, Y, y, then=false)
         (id, Moving, Dir.Up)
-        (id, Below, id1)
-        (id1, CellType, '.')
+        # (id, Below, id1)
+        # (id1, Type, '.')
       then:
         session.insert(id, Y, y-1)
         session.retract(id, Moving)
@@ -323,8 +385,8 @@ let (initSession, rules) =
       what:
         (id, X, x, then=false)
         (id, Moving, Dir.Left)
-        (id, RightOf, id1)
-        (id1, CellType, '.')
+        # (id, RightOf, id1)
+        # (id1, Type, '.')
       then:
         session.insert(id, X, x-1)
         session.retract(id, Moving)
@@ -333,8 +395,8 @@ let (initSession, rules) =
       what:
         (id, X, x, then=false)
         (id, Moving, Dir.Right)
-        (id, LeftOf, id1)
-        (id1, CellType, '.')
+        # (id, LeftOf, id1)
+        # (id1, Type, '.')
       then:
         session.insert(id, X, x+1)
         session.retract(id, Moving)
@@ -345,7 +407,7 @@ let (initSession, rules) =
         (Global, Input, input)
         (pid, X, x, then=false)
         (pid, Y, y, then=false)
-        (pid, CellType, '@', then=false)
+        (pid, Type, '@', then=false)
       then:
         discard
         # let
@@ -360,23 +422,23 @@ let (initSession, rules) =
         # PLAYER_ID = get_next_id()
         # session.insert(PLAYER_ID, X, x+dx)
         # session.insert(PLAYER_ID, Y, y+dy)
-        # session.insert(PLAYER_ID, CellType, '@')
+        # session.insert(PLAYER_ID, Type, '@')
         # session.insert(PLAYER_ID, T, t+1)
     rule doMovePlayer(Fact):
       what:
         (Global, TurnNumber, t)
 
-        (pid, CellType, '@', then=false)
+        (pid, Type, '@', then=false)
         (pid, X, px, then=false)
         (pid, Y, py, then=false)
         (pid, T, t, then=false)
 
-        (cid, CellType, '.', then=false)
+        (cid, Type, '.', then=false)
         (cid, X, cx, then=false)
         (cid, Y, cy, then=false)
         (cid, T, t, then=false)
 
-        (next_pid, CellType, '@', then=false)
+        (next_pid, Type, '@', then=false)
         (next_pid, X, next_x, then=false)
         (next_pid, Y, next_y, then=false)
         (next_pid, T, next_t, then=false)
@@ -398,19 +460,19 @@ let (initSession, rules) =
     # rule getQuestionAbove(Fact):
     #   what:
     #     (cid, Above, Player)
-    #     (cid, CellType, '?')
+    #     (cid, Type, '?')
     #   then:
     #     echo "? is above @"
     # rule getQuestionAdjacent(Fact):
     #   what:
     #     (cid, Adjacent, Player)
-    #     (cid, CellType, '?')
+    #     (cid, Type, '?')
     #   then:
     #     echo "? adjacent @"
     # rule getPlayerAdjacent(Fact):
     #   what:
     #     (Player, Adjacent, cid)
-    #     (cid, CellType, '?')
+    #     (cid, Type, '?')
     #   then:
     #     echo "@ adjacent ?"
 
@@ -425,13 +487,13 @@ let (initSession, rules) =
     #     # true
     #     n > 0
     #   then:
-    #     session.insert(id, CellType, '!')
+    #     session.insert(id, Type, '!')
     #     echo "! ",x,",",y
 
     # spawn
     # rule emptySpawnable(Fact):
     #   what:
-    #     (cid, CellType, '.')
+    #     (cid, Type, '.')
     #   then:
     #     session.insert(cid, Spawnable, true)
     # rule notSpawnableAdjacent(Fact):
@@ -457,7 +519,7 @@ let (initSession, rules) =
 
     # rule setSpawnable(Fact):
     #   what:
-    #     (id, CellType, '.')
+    #     (id, Type, '.')
     #     # (Derived, AdjacentCellsToPlayer, ids)
     #   cond:
     #     # id notin ids
@@ -478,86 +540,91 @@ proc cout(txt: string) =
   # echo txt
 proc cin(): string =
   readLineFromStdin("")
-proc is_char_in_str(ch: char, str: string): bool =
-  ch in str
 proc wait(seconds: float) =
   let ms = (seconds*1000).int
   sleep(ms)
-proc random_int(min: int, max: int): int =
-  rand(min..<max)
-proc roll_d20(): int =
-  random_int(1,20)
-proc random_coord(): coord2D =
-  (x: random_int(1, room_width-3),
-   y: random_int(1, room_height-3))
-proc coord_to_str_index(x: int, y: int): int =
-  y * room_width + x
-proc str_index_to_coord(index: int): coord2D =
-  (x: index mod room_width,
-   y: (index / room_width).int)
-proc in_bounds(x: int, y: int): bool =
-  x >= 0 and x < room_width and
-  y >= 0 and y < room_height
-proc set_char_at(ch: char, x: int, y: int) =
-  # if not in_bounds(x, y):
-  #   return
-
-  # let index = coord_to_str_index(x, y)
-  # room[index] = ch
-  discard
-proc char_at(x: int, y: int): char =
-  # if not in_bounds(x, y):
-  #   return '0'
-
-  # let index = coord_to_str_index(x, y)
-  # room[index]
-  return '.'
-proc is_adjacent_to(ch: char, x: int, y: int): bool =
-  let
-    above = char_at(x, y-1)
-    below = char_at(x, y+1)
-    left = char_at(x-1, y)
-    right = char_at(x+1, y)
-  above == ch or
-  below == ch or
-  left == ch or
-  right == ch
-proc get_shot_coords(): seq[coord2D] =
-  var shot_coords = newseq[coord2D](0)
-  for i in 0..<room_width:
-    for j in 0..<room_height:
-      let ch = char_at(i, j)
-      if is_char_in_str(ch, SHOOT_CH):
-        let coord = (x: i, y: j)
-        shot_coords.add(coord)
-  shot_coords
+proc in_bounds(x: int, y: int, width: int, height: int): bool =
+  x >= 0 and x < width and
+  y >= 0 and y < height
+# proc is_char_in_str(ch: char, str: string): bool =
+#   ch in str
+# proc random_int(min: int, max: int): int =
+#   rand(min..<max)
+# proc roll_d20(): int =
+#   random_int(1,20)
+# proc random_coord(): coord2D =
+#   (x: random_int(1, room_width-3),
+#    y: random_int(1, room_height-3))
+# proc coord_to_str_index(x: int, y: int): int =
+#   y * room_width + x
+# proc str_index_to_coord(index: int): coord2D =
+#   (x: index mod room_width,
+#    y: (index / room_width).int)
+# proc set_char_at(ch: char, x: int, y: int) =
+#   discard
+#   # if not in_bounds(x, y):
+#   #   return
+#   # let index = coord_to_str_index(x, y)
+#   # room[index] = ch
+# proc char_at(x: int, y: int): char =
+#   # if not in_bounds(x, y):
+#   #   return '0'
+#   # let index = coord_to_str_index(x, y)
+#   # room[index]
+#   return '.'
+# proc is_adjacent_to(ch: char, x: int, y: int): bool =
+#   let
+#     above = char_at(x, y-1)
+#     below = char_at(x, y+1)
+#     left = char_at(x-1, y)
+#     right = char_at(x+1, y)
+#   above == ch or
+#   below == ch or
+#   left == ch or
+#   right == ch
+# proc get_shot_coords(): seq[coord2D] =
+#   var shot_coords = newseq[coord2D](0)
+#   for i in 0..<room_width:
+#     for j in 0..<room_height:
+#       let ch = char_at(i, j)
+#       if is_char_in_str(ch, SHOOT_CH):
+#         let coord = (x: i, y: j)
+#         shot_coords.add(coord)
+#    shot_coords
 
 ######
 # draw
 ######
-proc set_cell(x: int, y: int, ch: char) =
-  if in_bounds(x,y):
+proc render_cell(x: int, y: int, ch: char, room_width: int, room_height: int) =
+  if in_bounds(x,y,room_width,room_height):
       room[y][x] = ch
 proc render_room() =
+  # query
   let g = session.query(rules.getGlobal)
-  
   let cells = session.queryAll(rules.getCell)
-  # let player = session.query(rules.getActor, id=PLAYER_ID, t=g.turn_number)
   let player = session.query(rules.getActor, id=PLAYER_ID)
   echo "get player id ",PLAYER_ID
+  
+  # clear
+  room[] = newSeqWith(g.room_height, newSeq[char](g.room_width))
 
   # static cells
   for cell in cells:
-    let (id,x,y,cell_type) = cell
-    set_cell(x,y,cell_type)
+    let (id,x,y,t) = cell
+    render_cell(x,y,t,g.room_width,g.room_height)
   
   # player
-  set_cell(player.x, player.y, '@')
+  render_cell(player.x, player.y, '@',g.room_width,g.room_height)
   
   # print
-  for j in 0..<room_height:
-    echo room[j].join
-
+  for j in 0..<g.room_height:
+    var row = ""
+    for i in 0..<g.room_width:
+      if room[j][i] == 0.char:
+        row.add(' ')
+      else:
+        row.add(room[j][i])
+    echo row
 proc render() =
   # echo "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
 
@@ -588,130 +655,6 @@ proc render() =
   else:
     cout "dead "
 
-#######
-# logic
-#######
-proc simulate() =
-  proc move_shots(coords: seq[coord2D]) =
-    for i in 0..<coords.len:
-      let
-        coord = coords[i]
-        x = coord.x
-        y = coord.y
-        ch = char_at(x, y)
-      case ch:
-        of '^':
-          set_char_at('.', x, y)
-          set_char_at('^', x, y-1)
-        of 'v':
-          set_char_at('.', x, y)
-          set_char_at('v', x, y+1)
-        of '<':
-          set_char_at('.', x, y)
-          set_char_at('<', x-1, y)
-        of '>':
-          set_char_at('.', x, y)
-          set_char_at('>', x+1, y)
-        else:
-          discard
-
-  let coords = get_shot_coords()
-  move_shots(coords)
-  # display(room, true)
-proc process_input(input_ch: char) =
-  discard
-
-  # pararules
-  session.insert(Global, Input, input_ch)
-
-  var
-    dx = 0
-    dy = 0
-  
-  # input
-  case input_ch:
-    # move
-    of 'w':
-      dy = -1
-    of 's':
-      dy = 1
-    of 'a':
-      dx = -1
-    of 'd':
-      dx = 1
-
-    # shoot
-    of '^':
-      dy = -1
-    of 'v':
-      dy = 1
-    of '>':
-      dx = 1
-    of '<':
-      dx = -1
-
-    else:
-      discard
-  
-  # let
-  #   is_move_ch = is_char_in_str(input_ch, MOVE_CH)
-  #   is_shoot_ch = is_char_in_str(input_ch, SHOOT_CH)
-
-  #   next_x = player_x + dx
-  #   next_y = player_y + dy
-  #   next_ch = char_at(next_x, next_y)
-
-  #   next_next_x = player_x + dx + dx
-  #   next_next_y = player_y + dy + dy
-  #   next_next_ch = char_at(next_next_x, next_next_y)
-  
-  # # move
-  # if is_move_ch and next_ch == '.':
-  #   set_char_at('.', player_x, player_y)
-  #   set_char_at('@', next_x, next_y)
-
-  #   # update pos
-  #   player_x = next_x
-  #   player_y = next_y
-
-  # push
-  # if is_move_ch and next_ch == 'o' and next_next_ch == '.':
-  #   # move player
-  #   set_char_at('.', player_x, player_y)
-  #   set_char_at('@', next_x, next_y)
-
-  #   # move bag
-  #   set_char_at('o', next_x+dx, next_y+dy)
-
-  #   # update pos
-  #   player_x = next_x
-  #   player_y = next_y
-
-  # shoot
-  # elif is_shoot_ch and next_ch == '.':
-  #   # place shot
-  #   set_char_at(input_ch, next_x, next_y)
-
-  # place enemy
-  # if roll_d20() < 5:
-  #   let
-  #     enemy_coord = random_coord()
-  #     ch = char_at(enemy_coord.x, enemy_coord.y)
-  #   if ch == '.':
-  #     set_char_at('!', enemy_coord.x, enemy_coord.y)
-  
-  # place bag
-  # elif roll_d20() < 3:
-  #   let
-  #     bag_coord = random_coord()
-  #     ch = char_at(bag_coord.x, bag_coord.y)
-  #   if ch == '.':
-  #     set_char_at('o', bag_coord.x, bag_coord.y)
-
-  # check alive
-  # if is_adjacent_to('!', player_x, player_y):
-  #   alive = false
-  
 ######
 # main
 ######
@@ -720,6 +663,9 @@ var
   input = ""
 
 # get room gen params
+var
+  room_width = 0
+  room_height = 0
 if args.len == 2:
   echo fmt("args: {args}")
   room_width = parseInt(args[0])+2
@@ -732,13 +678,9 @@ else:
   cout "height? "
   input = cin()
   room_height = parseInt(input)+2
-
+session.insert(Global, RoomWidth, room_width)
+session.insert(Global, RoomHeight, room_height)
 echo fmt "generating {room_width}x{room_height}..."
-
-# var
-#   delay = 0.0
-#   delay_add = 0.001
-#   delay_max = 0.02
 
 # intro animation
 proc intro() =
@@ -774,7 +716,7 @@ proc intro() =
   # # pararules
   # session.insert(Player, X, player_x)
   # session.insert(Player, Y, player_y)
-  # session.insert(Player, CellType, '@')
+  # session.insert(Player, Type, '@')
 
   # wait(0.1)
 
@@ -785,7 +727,7 @@ proc intro() =
   # let qid = get_next_id()
   # session.insert(qid, X, help_coord.x)
   # session.insert(qid, Y, help_coord.y)
-  # session.insert(qid, CellType, '?')
+  # session.insert(qid, Type, '?')
 intro()
 
 # done generating
@@ -799,14 +741,13 @@ echo "pararules init..."
 session.insert(Global, TurnNumber, 0)
 session.insert(Global, ShowHelp, false)
 session.insert(Global, Alive, true)
-for i in 0..<room_width:
-  for j in 0..<room_height:
-    let id = get_next_id()
-    let cell_type = if (i == 0 or i == room_width-1 or
-                        j == 0 or j == room_height-1): '#' else: '.'
-    session.insert(id, X, i)
-    session.insert(id, Y, j)
-    session.insert(id, CellType, cell_type)
+for x in 0..<room_width:
+  for y in 0..<room_height:
+    let space_id = get_next_id()
+    session.insert(space_id, X, x)
+    session.insert(space_id, Y, y)
+    session.insert(space_id, Type, ' ')
+    
 echo "fireRules..."
 session.fireRules()
 echo "done"
